@@ -1,4 +1,26 @@
 const Processor = {
+    // Helper to format date
+    formatDate: (val) => {
+        if (!val) return 'N/A';
+        // Excel Serial Date
+        if (typeof val === 'number') {
+            const date = new Date(Math.round((val - 25569) * 86400 * 1000));
+            const d = date.getDate().toString().padStart(2, '0');
+            const m = (date.getMonth() + 1).toString().padStart(2, '0');
+            const y = date.getFullYear().toString().slice(-2); // yy
+            return `${d}-${m}-${y}`;
+        }
+        // String Date handling (try to parse)
+        const date = new Date(val);
+        if (!isNaN(date.getTime())) {
+            const d = date.getDate().toString().padStart(2, '0');
+            const m = (date.getMonth() + 1).toString().padStart(2, '0');
+            const y = date.getFullYear().toString().slice(-2);
+            return `${d}-${m}-${y}`;
+        }
+        return val; // Return original if parsing fails
+    },
+
     // Read Excel File
     readExcel: (file) => {
         return new Promise((resolve, reject) => {
@@ -113,7 +135,7 @@ const Processor = {
 
         // Filter data to only these columns
         const reportData = data.map(row => ({
-            Fecha: row[colMap.fecha] || 'N/A',
+            Fecha: Processor.formatDate(row[colMap.fecha]),
             Granja: row[colMap.granja] || 'N/A',
             Propietario: row[colMap.propietario] || 'N/A',
             Enfermedad: row[colMap.enfermedad] || 'N/A',
@@ -126,6 +148,7 @@ const Processor = {
             byDisease: Processor.frequency(reportData.map(d => d.Enfermedad)),
             byResult: Processor.frequency(reportData.map(d => d.Resultado)),
             byFarm: Processor.frequency(reportData.map(d => d.Granja)),
+            byOwner: Processor.frequency(reportData.map(d => d.Propietario)),
             positivityRate: {}
         };
 
@@ -147,7 +170,45 @@ const Processor = {
             stats.positivityRate[dis] = ((counts.positive / counts.total) * 100).toFixed(1) + '%';
         });
 
+        // Box Plot Stats (Distribution of Counts)
+        const farmCounts = Object.values(stats.byFarm).sort((a, b) => a - b);
+        const diseaseCounts = Object.values(stats.byDisease).sort((a, b) => a - b);
+        // NEW: Owner Counts
+        const ownerFrequency = Processor.frequency(reportData.map(d => d.Propietario));
+        const ownerCounts = Object.values(ownerFrequency).sort((a, b) => a - b);
+
+
+        stats.boxPlots = {
+            farms: Processor.calculateQuartiles(farmCounts),
+            diseases: Processor.calculateQuartiles(diseaseCounts),
+            owners: Processor.calculateQuartiles(ownerCounts)
+        };
+
         return { raw: reportData, stats: stats };
+    },
+
+    calculateQuartiles: (sortedArr) => {
+        if (sortedArr.length === 0) return { min: 0, q1: 0, median: 0, q3: 0, max: 0 };
+
+        const quantile = (arr, q) => {
+            const pos = (arr.length - 1) * q;
+            const base = Math.floor(pos);
+            const rest = pos - base;
+            if (arr[base + 1] !== undefined) {
+                return arr[base] + rest * (arr[base + 1] - arr[base]);
+            } else {
+                return arr[base];
+            }
+        };
+
+        return {
+            min: sortedArr[0],
+            q1: quantile(sortedArr, 0.25),
+            median: quantile(sortedArr, 0.5),
+            q3: quantile(sortedArr, 0.75),
+            max: sortedArr[sortedArr.length - 1]
+        };
     }
+
 
 };
